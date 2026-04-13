@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
-import type { Customer } from "@/lib/customer-data";
+import type { Customer, Sector } from "@/lib/customer-data";
 
 interface BubbleChartProps {
   customers: Customer[];
@@ -10,6 +10,8 @@ interface BubbleChartProps {
   selectedCustomer: Customer | null;
   filter: string;
   searchQuery: string;
+  activityFilter: "all" | "active" | "inactive";
+  sectorFilter: "all" | Sector;
 }
 
 const pipelineColors = {
@@ -26,9 +28,14 @@ const pipelineRingColors = {
   closing: "rgba(16, 185, 129, 0.5)",
 };
 
-// Color for unprofitable customers
 const unprofitableColor = "#dc2626";
 const unprofitableRingColor = "rgba(220, 38, 38, 0.4)";
+
+const sectorCenters = (width: number): Record<Sector, number> => ({
+  Insurance: width * 0.24,
+  "Asset Management": width * 0.5,
+  "Sell-Side": width * 0.76,
+});
 
 function getCustomerColor(customer: Customer): string {
   const isUnprofitable = customer.monthlyCosts > customer.monthlyRevenue;
@@ -42,12 +49,32 @@ function getCustomerRingColor(customer: Customer): string {
   return pipelineRingColors[customer.pipelineStatus];
 }
 
+function getBubbleFill(customer: Customer): string {
+  const base = getCustomerColor(customer);
+  if (customer.accountStatus === "inactive") {
+    const hsl = d3.hsl(base);
+    hsl.s = Math.max(0, hsl.s * 0.4);
+    hsl.l = Math.min(0.82, hsl.l + 0.2);
+    return hsl.formatHex();
+  }
+  return base;
+}
+
+type BubbleSimulationNode = Customer & {
+  radius: number;
+  ringRadius: number;
+  x: number;
+  y: number;
+};
+
 export function BubbleChart({
   customers,
   onCustomerSelect,
   selectedCustomer,
   filter,
   searchQuery,
+  activityFilter,
+  sectorFilter,
 }: BubbleChartProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -81,29 +108,53 @@ export function BubbleChart({
     let filteredCustomers = customers.filter((c) => {
       const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase());
       const isUnprofitable = c.monthlyCosts > c.monthlyRevenue;
-      
-      if (filter === "all") return matchesSearch;
-      if (filter === "pipeline") return matchesSearch && c.pipelineValue > 0;
-      if (filter === "profitable") return matchesSearch && c.monthlyRevenue - c.monthlyCosts > 500000;
-      if (filter === "unprofitable") return matchesSearch && isUnprofitable;
-      if (filter === "highheadcount") return matchesSearch && c.headcount >= 20;
-      return matchesSearch;
+      const matchesActivity =
+        activityFilter === "all" || c.accountStatus === activityFilter;
+      const matchesSector = sectorFilter === "all" || c.sector === sectorFilter;
+
+      if (!matchesSearch || !matchesActivity || !matchesSector) return false;
+
+      if (filter === "all") return true;
+      if (filter === "pipeline") return c.pipelineValue > 0;
+      if (filter === "profitable") return c.monthlyRevenue - c.monthlyCosts > 500000;
+      if (filter === "unprofitable") return isUnprofitable;
+      if (filter === "highheadcount") return c.headcount >= 20;
+      return true;
     });
 
     const { width, height } = dimensions;
     const centerX = width / 2;
     const centerY = height / 2;
 
-    // Scale for bubble sizes based on headcount
-    const headcountExtent = d3.extent(filteredCustomers, (d) => d.headcount) as [number, number];
-    const radiusScale = d3.scaleSqrt().domain(headcountExtent).range([20, 70]);
+    if (filteredCustomers.length === 0) {
+      svg
+        .append("text")
+        .attr("x", centerX)
+        .attr("y", centerY)
+        .attr("text-anchor", "middle")
+        .attr("fill", "#64748b")
+        .attr("font-size", 15)
+        .text("No customers match the current filters.");
+      return;
+    }
 
-    // Scale for pipeline ring thickness
+    const headcountExtent = d3.extent(filteredCustomers, (d) => d.headcount);
+    const domain: [number, number] =
+      headcountExtent[0] == null || headcountExtent[1] == null
+        ? [0, 1]
+        : [headcountExtent[0], headcountExtent[1]];
+    const radiusScale = d3.scaleSqrt().domain(domain).range([20, 70]);
+
     const pipelineExtent = d3.extent(customers, (d) => d.pipelineValue) as [number, number];
-    const ringScale = d3.scaleLinear().domain([0, pipelineExtent[1] || 1]).range([0, 15]);
+    const ringScale = d3
+      .scaleLinear()
+      .domain([0, pipelineExtent[1] || 1])
+      .range([0, 15]);
 
-    // Create nodes with initial positions
-    const nodes = filteredCustomers.map((customer) => ({
+    const centers = sectorCenters(width);
+    const sectorStrength = sectorFilter === "all" ? 0.075 : 0.04;
+
+    const nodes: BubbleSimulationNode[] = filteredCustomers.map((customer) => ({
       ...customer,
       radius: radiusScale(customer.headcount),
       ringRadius: customer.pipelineValue > 0 ? ringScale(customer.pipelineValue) : 0,
@@ -111,23 +162,22 @@ export function BubbleChart({
       y: centerY + (Math.random() - 0.5) * 100,
     }));
 
-    // Create force simulation
     const simulation = d3
-      .forceSimulation(nodes)
+      .forceSimulation<BubbleSimulationNode>(nodes)
       .force("center", d3.forceCenter(centerX, centerY))
       .force("charge", d3.forceManyBody().strength(-5))
       .force(
         "collision",
-        d3.forceCollide<(typeof nodes)[0]>().radius((d) => {
+        d3.forceCollide<BubbleSimulationNode>().radius((d) => {
           const isUnprofitable = d.monthlyCosts > d.monthlyRevenue;
           const extraRing = isUnprofitable ? 8 : d.ringRadius;
           return d.radius + extraRing + 4;
         })
       )
-      .force("x", d3.forceX(centerX).strength(0.05))
+      .force("sectorX", d3.forceX<BubbleSimulationNode>((d) => centers[d.sector]).strength(sectorStrength))
+      .force("x", d3.forceX(centerX).strength(0.03))
       .force("y", d3.forceY(centerY).strength(0.05));
 
-    // Create bubble groups
     const bubbleGroups = svg
       .selectAll("g.bubble")
       .data(nodes)
@@ -155,7 +205,6 @@ export function BubbleChart({
         setTooltip({ show: false, x: 0, y: 0, customer: null });
       });
 
-    // Add pipeline ring (outer ring) - for pipeline deals OR unprofitable customers
     bubbleGroups
       .filter((d) => d.pipelineValue > 0 || d.monthlyCosts > d.monthlyRevenue)
       .append("circle")
@@ -166,24 +215,27 @@ export function BubbleChart({
       })
       .attr("fill", (d) => getCustomerRingColor(d))
       .attr("stroke", (d) => getCustomerColor(d))
-      .attr("stroke-width", 2)
+      .attr("stroke-width", (d) => (d.accountStatus === "inactive" ? 1.5 : 2))
       .attr("stroke-dasharray", (d) => {
         const isUnprofitable = d.monthlyCosts > d.monthlyRevenue;
+        if (d.accountStatus === "inactive") return "5,4";
         if (isUnprofitable) return "6,3";
         return d.pipelineStatus === "early" ? "4,4" : "none";
-      });
+      })
+      .attr("opacity", (d) => (d.accountStatus === "inactive" ? 0.65 : 1));
 
-    // Add main bubble
     bubbleGroups
       .append("circle")
       .attr("class", "main-bubble")
       .attr("r", (d) => d.radius)
-      .attr("fill", (d) => getCustomerColor(d))
-      .attr("stroke", "#fff")
-      .attr("stroke-width", 2)
-      .attr("opacity", 0.9);
+      .attr("fill", (d) => getBubbleFill(d))
+      .attr("stroke", (d) => {
+        if (selectedCustomer?.id === d.id) return "#0f172a";
+        return d.accountStatus === "inactive" ? "#94a3b8" : "#fff";
+      })
+      .attr("stroke-width", (d) => (selectedCustomer?.id === d.id ? 3.5 : 2))
+      .attr("opacity", (d) => (d.accountStatus === "inactive" ? 0.72 : 0.92));
 
-    // Add company name text
     bubbleGroups
       .append("text")
       .attr("text-anchor", "middle")
@@ -191,22 +243,21 @@ export function BubbleChart({
       .attr("fill", "#fff")
       .attr("font-size", (d) => Math.max(10, d.radius / 4))
       .attr("font-weight", "500")
+      .attr("opacity", (d) => (d.accountStatus === "inactive" ? 0.85 : 1))
       .text((d) => {
         const maxChars = Math.floor(d.radius / 5);
         return d.name.length > maxChars ? d.name.slice(0, maxChars) + "..." : d.name;
       });
 
-    // Add headcount text
     bubbleGroups
       .filter((d) => d.radius > 30)
       .append("text")
       .attr("text-anchor", "middle")
       .attr("dy", "1.8em")
-      .attr("fill", "rgba(255,255,255,0.8)")
+      .attr("fill", "rgba(255,255,255,0.82)")
       .attr("font-size", (d) => Math.max(8, d.radius / 5))
       .text((d) => `${d.headcount} staff`);
 
-    // Update positions on tick
     simulation.on("tick", () => {
       bubbleGroups.attr("transform", (d) => `translate(${d.x},${d.y})`);
     });
@@ -214,7 +265,16 @@ export function BubbleChart({
     return () => {
       simulation.stop();
     };
-  }, [customers, dimensions, filter, searchQuery, onCustomerSelect]);
+  }, [
+    customers,
+    dimensions,
+    filter,
+    searchQuery,
+    onCustomerSelect,
+    activityFilter,
+    sectorFilter,
+    selectedCustomer,
+  ]);
 
   return (
     <div ref={containerRef} className="relative w-full h-full min-h-[500px]">
@@ -224,8 +284,7 @@ export function BubbleChart({
         height={dimensions.height}
         className="w-full h-full"
       />
-      
-      {/* Tooltip */}
+
       {tooltip.show && tooltip.customer && (
         <div
           className="absolute z-50 bg-slate-900 text-white p-4 rounded-lg shadow-xl border border-slate-700 pointer-events-none"
@@ -237,19 +296,48 @@ export function BubbleChart({
         >
           <h4 className="font-bold text-lg mb-2">{tooltip.customer.name}</h4>
           <div className="space-y-1 text-sm">
-            <p><span className="text-slate-400">Industry:</span> {tooltip.customer.industry}</p>
-            <p><span className="text-slate-400">Headcount:</span> {tooltip.customer.headcount} employees</p>
-            <p><span className="text-slate-400">Monthly Revenue:</span> ${(tooltip.customer.monthlyRevenue / 1000000).toFixed(2)}M</p>
-            <p><span className="text-slate-400">Monthly Costs:</span> ${(tooltip.customer.monthlyCosts / 1000000).toFixed(2)}M</p>
+            <p>
+              <span className="text-slate-400">Sector:</span> {tooltip.customer.sector}
+            </p>
+            <p>
+              <span className="text-slate-400">Account:</span>{" "}
+              <span
+                className={
+                  tooltip.customer.accountStatus === "active" ? "text-emerald-300" : "text-slate-400"
+                }
+              >
+                {tooltip.customer.accountStatus === "active" ? "Active" : "Inactive"}
+              </span>
+            </p>
+            <p>
+              <span className="text-slate-400">Headcount:</span> {tooltip.customer.headcount} on project
+            </p>
+            <p>
+              <span className="text-slate-400">Monthly Revenue:</span> $
+              {(tooltip.customer.monthlyRevenue / 1000000).toFixed(2)}M
+            </p>
+            <p>
+              <span className="text-slate-400">Monthly Costs:</span> $
+              {(tooltip.customer.monthlyCosts / 1000000).toFixed(2)}M
+            </p>
             <p>
               <span className="text-slate-400">Profit:</span>{" "}
-              <span className={tooltip.customer.monthlyRevenue - tooltip.customer.monthlyCosts > 0 ? "text-green-400" : "text-red-400"}>
+              <span
+                className={
+                  tooltip.customer.monthlyRevenue - tooltip.customer.monthlyCosts > 0
+                    ? "text-green-400"
+                    : "text-red-400"
+                }
+              >
                 ${((tooltip.customer.monthlyRevenue - tooltip.customer.monthlyCosts) / 1000000).toFixed(2)}M
               </span>
             </p>
             {tooltip.customer.pipelineValue > 0 && (
               <>
-                <p><span className="text-slate-400">Pipeline Value:</span> ${(tooltip.customer.pipelineValue / 1000000).toFixed(2)}M</p>
+                <p>
+                  <span className="text-slate-400">Pipeline Value:</span> $
+                  {(tooltip.customer.pipelineValue / 1000000).toFixed(2)}M
+                </p>
                 <p>
                   <span className="text-slate-400">Pipeline Status:</span>{" "}
                   <span

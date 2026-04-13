@@ -1,13 +1,26 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { Customer } from "@/lib/customer-data";
 import { expenses } from "@/lib/customer-data";
-import { X, Users, TrendingUp, TrendingDown, DollarSign, Briefcase } from "lucide-react";
+import {
+  X,
+  Users,
+  TrendingUp,
+  TrendingDown,
+  DollarSign,
+  Briefcase,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface CustomerDetailModalProps {
   customer: Customer;
   onClose: () => void;
 }
+
+type CostBasis = "lifetime" | "recent" | "monthly";
 
 function formatCurrency(amount: number): string {
   if (amount >= 1000000) {
@@ -24,22 +37,62 @@ const pipelineStatusConfig = {
 };
 
 export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalProps) {
+  const [costBasis, setCostBasis] = useState<CostBasis>("lifetime");
+  const [headcountOpen, setHeadcountOpen] = useState(false);
+
+  useEffect(() => {
+    setCostBasis("lifetime");
+    setHeadcountOpen(false);
+  }, [customer.id]);
+
   const profit = customer.monthlyRevenue - customer.monthlyCosts;
   const profitMargin = ((profit / customer.monthlyRevenue) * 100).toFixed(1);
   const customerExpenses = expenses.filter((e) => e.customerId === customer.id);
   const totalCustomerExpenses = customerExpenses.reduce((sum, e) => sum + e.amount, 0);
 
+  const costDisplay =
+    costBasis === "lifetime"
+      ? customer.cumulativeCostsSinceInception
+      : costBasis === "recent"
+        ? customer.mostRecentProjectCost
+        : customer.monthlyCosts;
+
+  const costCaption =
+    costBasis === "lifetime"
+      ? "Cumulative delivery cost since this customer relationship began."
+      : costBasis === "recent"
+        ? "Attributed to the most recently completed project phase."
+        : "Average monthly run rate (mock).";
+
+  const usPct = customer.headcount > 0 ? Math.round((customer.headcountUS / customer.headcount) * 100) : 0;
+  const inPct = customer.headcount > 0 ? Math.round((customer.headcountIndia / customer.headcount) * 100) : 0;
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
-        {/* Header */}
         <div className="bg-gradient-to-r from-[#1e3a5f] to-[#2d5a87] p-6 text-white">
           <div className="flex items-start justify-between">
             <div>
               <h2 className="text-2xl font-bold">{customer.name}</h2>
-              <p className="text-blue-200 mt-1">{customer.industry}</p>
+              <p className="text-blue-200 mt-1">
+                {customer.sector}
+                <span className="text-white/50 mx-2">·</span>
+                <span className="text-blue-100/90">{customer.industry}</span>
+              </p>
+              <p className="mt-2">
+                <span
+                  className={`inline-flex text-xs font-semibold uppercase tracking-wide px-2.5 py-1 rounded-full ${
+                    customer.accountStatus === "active"
+                      ? "bg-emerald-500/25 text-emerald-100"
+                      : "bg-white/15 text-slate-200"
+                  }`}
+                >
+                  {customer.accountStatus === "active" ? "Active account" : "Inactive account"}
+                </span>
+              </p>
             </div>
             <button
+              type="button"
               onClick={onClose}
               className="p-2 hover:bg-white/10 rounded-lg transition-colors"
             >
@@ -47,7 +100,6 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
             </button>
           </div>
 
-          {/* Pipeline Status Badge */}
           {customer.pipelineStatus !== "none" && (
             <div className="mt-4">
               <span
@@ -63,17 +115,29 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
           )}
         </div>
 
-        {/* Content */}
         <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
-          {/* Key Metrics */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div className="bg-slate-50 rounded-lg p-4">
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <Users className="w-4 h-4" />
-                <span className="text-xs font-medium">Headcount</span>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+            <button
+              type="button"
+              onClick={() => setHeadcountOpen((o) => !o)}
+              className={`bg-slate-50 rounded-lg p-4 text-left ring-2 transition-all hover:bg-slate-100/80 focus:outline-none focus-visible:ring-[#1e3a5f] ${
+                headcountOpen ? "ring-[#1e3a5f]/40 bg-slate-100/80" : "ring-transparent"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2 text-slate-500 mb-1">
+                <span className="flex items-center gap-2 text-xs font-medium">
+                  <Users className="w-4 h-4" />
+                  Headcount
+                </span>
+                {headcountOpen ? (
+                  <ChevronDown className="w-4 h-4 shrink-0" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 shrink-0" />
+                )}
               </div>
-              <p className="text-2xl font-bold text-slate-900">{customer.headcount}</p>
-            </div>
+              <p className="text-2xl font-bold text-slate-900 tabular-nums">{customer.headcount}</p>
+              <p className="text-[11px] text-slate-500 mt-1">Click to see US / India on this project</p>
+            </button>
 
             <div className="bg-slate-50 rounded-lg p-4">
               <div className="flex items-center gap-2 text-slate-500 mb-1">
@@ -81,14 +145,7 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
                 <span className="text-xs font-medium">Revenue</span>
               </div>
               <p className="text-2xl font-bold text-emerald-600">{formatCurrency(customer.monthlyRevenue)}</p>
-            </div>
-
-            <div className="bg-slate-50 rounded-lg p-4">
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <TrendingDown className="w-4 h-4" />
-                <span className="text-xs font-medium">Costs</span>
-              </div>
-              <p className="text-2xl font-bold text-rose-600">{formatCurrency(customer.monthlyCosts)}</p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Monthly</p>
             </div>
 
             <div className="bg-slate-50 rounded-lg p-4">
@@ -99,10 +156,74 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
               <p className={`text-2xl font-bold ${profit > 0 ? "text-emerald-600" : "text-rose-600"}`}>
                 {formatCurrency(profit)}
               </p>
+              <p className="text-[11px] text-slate-500 mt-0.5">Monthly</p>
+            </div>
+
+            <div className="bg-slate-50 rounded-lg p-4 col-span-2 md:col-span-3">
+              <div className="flex items-center gap-2 text-slate-500 mb-2">
+                <TrendingDown className="w-4 h-4" />
+                <span className="text-xs font-medium">Cost</span>
+              </div>
+              <ToggleGroup
+                type="single"
+                value={costBasis}
+                onValueChange={(v) => v && setCostBasis(v as CostBasis)}
+                variant="outline"
+                size="sm"
+                className="w-full max-w-xl justify-stretch mb-2"
+              >
+                <ToggleGroupItem value="lifetime" className="text-xs px-2">
+                  Since inception
+                </ToggleGroupItem>
+                <ToggleGroupItem value="recent" className="text-xs px-2">
+                  Last project
+                </ToggleGroupItem>
+                <ToggleGroupItem value="monthly" className="text-xs px-2">
+                  Avg / month
+                </ToggleGroupItem>
+              </ToggleGroup>
+              <p className="text-2xl font-bold text-rose-600 tabular-nums">{formatCurrency(costDisplay)}</p>
+              <p className="text-[11px] text-slate-500 mt-1 leading-snug max-w-xl">{costCaption}</p>
             </div>
           </div>
 
-          {/* Profitability Analysis */}
+          {headcountOpen && (
+            <div className="mb-6 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5 shadow-sm">
+              <p className="text-sm font-semibold text-slate-800 mb-1">Project staffing by region</p>
+              <p className="text-xs text-slate-500 mb-4">Mock allocation for delivery roles on the active engagement.</p>
+              <div className="flex h-3 rounded-full overflow-hidden bg-slate-200/80 mb-4">
+                <div
+                  className="h-full bg-[#1e3a5f] transition-all"
+                  style={{ width: `${usPct}%` }}
+                  title={`United States: ${customer.headcountUS}`}
+                />
+                <div
+                  className="h-full bg-[#0d9488]"
+                  style={{ width: `${inPct}%` }}
+                  title={`India: ${customer.headcountIndia}`}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-start gap-3">
+                  <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[#1e3a5f]" />
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">United States</p>
+                    <p className="text-2xl font-bold text-[#1e3a5f] tabular-nums">{customer.headcountUS}</p>
+                    <p className="text-xs text-slate-500">{usPct}% of project</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full bg-[#0d9488]" />
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">India</p>
+                    <p className="text-2xl font-bold text-[#0d9488] tabular-nums">{customer.headcountIndia}</p>
+                    <p className="text-xs text-slate-500">{inPct}% of project</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl p-5 mb-6">
             <h3 className="text-white font-semibold mb-3">Profitability Analysis</h3>
             <div className="flex items-center justify-between">
@@ -118,7 +239,6 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
               </div>
             </div>
 
-            {/* Profit Bar */}
             <div className="mt-4">
               <div className="h-3 bg-slate-600 rounded-full overflow-hidden">
                 <div
@@ -129,7 +249,6 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
             </div>
           </div>
 
-          {/* Customer-Specific Expenses */}
           {customerExpenses.length > 0 && (
             <div className="mb-6">
               <div className="flex items-center gap-2 mb-3">
@@ -156,7 +275,6 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
             </div>
           )}
 
-          {/* Pipeline Details */}
           {customer.pipelineValue > 0 && (
             <div>
               <h3 className="font-semibold text-slate-900 mb-3">Pipeline Opportunity</h3>
@@ -174,8 +292,10 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
                   </span>
                 </div>
                 <p className="text-sm text-slate-500 mt-3">
-                  {customer.pipelineStatus === "early" && "Initial discussions underway. Opportunity identified but not yet qualified."}
-                  {customer.pipelineStatus === "negotiating" && "Active negotiations in progress. Terms being discussed."}
+                  {customer.pipelineStatus === "early" &&
+                    "Initial discussions underway. Opportunity identified but not yet qualified."}
+                  {customer.pipelineStatus === "negotiating" &&
+                    "Active negotiations in progress. Terms being discussed."}
                   {customer.pipelineStatus === "closing" && "Deal near completion. Final approvals pending."}
                 </p>
               </div>
@@ -183,9 +303,9 @@ export function CustomerDetailModal({ customer, onClose }: CustomerDetailModalPr
           )}
         </div>
 
-        {/* Footer */}
         <div className="border-t border-slate-200 p-4 bg-slate-50">
           <button
+            type="button"
             onClick={onClose}
             className="w-full bg-[#1e3a5f] hover:bg-[#2d5a87] text-white font-medium py-2.5 px-4 rounded-lg transition-colors"
           >

@@ -11,7 +11,9 @@ import {
   getTotalRevenue,
   getTotalCosts,
   getTotalPipeline,
+  SECTORS,
   type Customer,
+  type Sector,
 } from "@/lib/customer-data";
 
 function formatCurrency(amount: number): string {
@@ -32,6 +34,8 @@ const pipelineLegend = [
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [activityFilter, setActivityFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sectorFilter, setSectorFilter] = useState<"all" | Sector>("all");
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [showExpenses, setShowExpenses] = useState(false);
 
@@ -140,8 +144,9 @@ export default function Dashboard() {
                 <div>
                   <h2 className="text-xl font-bold text-slate-900">Customer Portfolio Overview</h2>
                   <p className="text-sm text-slate-500 mt-1">
-                    Visualizing {customers.length} customers. Bubble size represents headcount allocation. 
-                    Outer ring indicates pipeline opportunity.
+                    Visualizing {customers.length} customers. Bubble size reflects project headcount; soft columns group Insurance,
+                    Asset Management, and Sell-Side. Outer ring indicates pipeline (or loss-making accounts). Inactive
+                    accounts appear muted with a dashed ring.
                   </p>
                 </div>
 
@@ -174,41 +179,110 @@ export default function Dashboard() {
               </div>
 
               {/* Filters */}
-              <div className="flex flex-wrap items-center gap-2 mt-4">
-                <Filter className="w-4 h-4 text-slate-400" />
-                {[
-                  { value: "all", label: "All Customers" },
-                  { value: "pipeline", label: "Pipeline Deals" },
-                  { value: "profitable", label: "High Profit" },
-                  { value: "unprofitable", label: "Unprofitable" },
-                  { value: "highheadcount", label: "Large Teams (20+)" },
-                ].map((filterOption) => (
+              <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+                  {[
+                    { value: "all", label: "All Customers" },
+                    { value: "pipeline", label: "Pipeline Deals" },
+                    { value: "profitable", label: "High Profit" },
+                    { value: "unprofitable", label: "Unprofitable" },
+                    { value: "highheadcount", label: "Large Teams (20+)" },
+                  ].map((filterOption) => (
+                    <button
+                      key={filterOption.value}
+                      type="button"
+                      onClick={() => setFilter(filterOption.value)}
+                      className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        filter === filterOption.value
+                          ? "bg-[#1e3a5f] text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {filterOption.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-6">
+                  <span className="text-xs font-medium text-slate-500 w-full sm:w-auto sm:mr-1">Account</span>
+                  {(
+                    [
+                      { value: "all" as const, label: "All" },
+                      { value: "active" as const, label: "Active" },
+                      { value: "inactive" as const, label: "Inactive" },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setActivityFilter(opt.value)}
+                      className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        activityFilter === opt.value
+                          ? "bg-emerald-700 text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pl-0 sm:pl-6">
+                  <span className="text-xs font-medium text-slate-500 w-full sm:w-auto sm:mr-1">Sector</span>
                   <button
-                    key={filterOption.value}
-                    onClick={() => setFilter(filterOption.value)}
+                    type="button"
+                    onClick={() => setSectorFilter("all")}
                     className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                      filter === filterOption.value
-                        ? "bg-[#1e3a5f] text-white"
+                      sectorFilter === "all"
+                        ? "bg-slate-800 text-white"
                         : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                     }`}
                   >
-                    {filterOption.label}
+                    All sectors
                   </button>
-                ))}
+                  {SECTORS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setSectorFilter(s)}
+                      className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        sectorFilter === s
+                          ? "bg-slate-800 text-white"
+                          : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Legend */}
-              <div className="flex flex-wrap items-center gap-6 mt-4 pt-4 border-t border-slate-100">
-                <span className="text-xs text-slate-500 font-medium">Pipeline Status:</span>
-                {pipelineLegend.map((item) => (
-                  <div key={item.status} className="flex items-center gap-2">
-                    <span
-                      className="w-4 h-4 rounded-full"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    <span className="text-xs text-slate-600">{item.label}</span>
+              <div className="flex flex-col gap-3 mt-4 pt-4 border-t border-slate-100">
+                <div className="flex flex-wrap items-center gap-6">
+                  <span className="text-xs text-slate-500 font-medium">Pipeline Status:</span>
+                  {pipelineLegend.map((item) => (
+                    <div key={item.status} className="flex items-center gap-2">
+                      <span className="w-4 h-4 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-xs text-slate-600">{item.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-6">
+                  <span className="text-xs text-slate-500 font-medium">Account:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="w-4 h-4 rounded-full bg-[#1e3a5f] opacity-90 border-2 border-white shadow-sm" />
+                    <span className="text-xs text-slate-600">Active (full color)</span>
                   </div>
-                ))}
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-4 h-4 rounded-full border-2 border-dashed border-slate-400 bg-slate-300/80"
+                      style={{ opacity: 0.85 }}
+                    />
+                    <span className="text-xs text-slate-600">Inactive (muted + dashed ring)</span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -220,6 +294,8 @@ export default function Dashboard() {
                 selectedCustomer={selectedCustomer}
                 filter={filter}
                 searchQuery={searchQuery}
+                activityFilter={activityFilter}
+                sectorFilter={sectorFilter}
               />
             </div>
           </div>
